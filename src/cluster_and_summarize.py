@@ -4,10 +4,26 @@ from sklearn.cluster import KMeans
 from typing import List
 from langchain.embeddings.base import Embeddings
 from langchain.base_language import BaseLanguageModel
+from langchain.schema.document import Document
+from langchain.vectorstores.base import VectorStore
+
+SUMMARIZE_TEXT_PROMPT = """
+        You are an AI assitant. You are helping with the task of summarization.
+        Below you will find a text fragment, Tell me what is this about. Be as concise as possible with your summary.
+
+        ANSWER ONLY WITH THE SUMMARY. DO NOT INCLUDE THE ORIGINAL TEXT, DO NOT ASK QUESTIONS OR SUGGESTIONS.
+        ###
+
+        {paragraph}"""
 
 
 def cluster_and_summarize(
-    texts: List[str], n_summaries: int, embeddings: Embeddings, llm: BaseLanguageModel, prompt: str, n_clusters: int = 5
+    texts: List[str],
+    n_summaries: int,
+    embeddings: Embeddings,
+    llm: BaseLanguageModel,
+    prompt: str = SUMMARIZE_TEXT_PROMPT,
+    n_clusters: int = 5,
 ) -> DataFrame:
     """Method to recursively cluster and summarize documents.
 
@@ -53,3 +69,41 @@ def cluster_and_summarize(
         prev_clusters = n_clusters
 
     return df
+
+
+def process_df(df: DataFrame) -> List[Document]:
+    """Converts a DataFrame into a list of Documents.
+    Parent-child relationship is established by the order of the columns.
+
+    Args:
+        df (DataFrame): DataFrame with the text to be converted into Documents
+    """
+    text_cols = ["text"] + [col for col in df.columns if "summary" == col.split("_")[-1]]
+    docs = []
+    for index, values in df[text_cols].iterrows():
+        for i in range(len(text_cols)):
+            try:
+                metadata = {
+                    "cluster_summary": values.iloc[i + 1],
+                    "node_position": i,
+                }
+            except IndexError:
+                metadata = {
+                    "cluster_summary": "root node",
+                    "node_position": "root node",
+                }
+            doc = Document(values.iloc[0], metadata=metadata)
+            docs.append(doc)
+
+    return docs
+
+
+async def embed_docs(vector_db: VectorStore, docs: List[Document], embeddings: Embeddings) -> None:
+    """Embeds documents into a VectorStore
+
+    Args:
+        vector_db (VectorStore): Langchain VectorStore object
+        docs (List[Document]): List of documents to be embedded
+        embeddings (Embeddings): Langchain embeddings object
+    """
+    await vector_db.afrom_documents(docs, embedding=embeddings)
